@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dolphin.Domain\Dolphin.Domain.csproj" />
+    <ProjectReference Include="..\Dolphin.Commands.Application\Dolphin.Commands.Application.csproj" />
+  </ItemGroup>
+
+</Project>

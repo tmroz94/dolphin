@@ -1,0 +1,17 @@
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+
+# Step 1: Set up dotnet watch (no publish here, dev container only)
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+
+# Step 2: Copy the local package and nuget.config
+COPY ./.nugets/ /nugets
+
+# Step 3: Add the local package source
+RUN ["dotnet", "nuget", "add", "source", "/nugets", "-n", "LocalNugets"]
+
+WORKDIR /app/Dolphin.Commands.API
+
+# Step 4: Default command runs dotnet watch from correct path
+CMD ["dotnet", "watch", "--project", "Dolphin.Commands.API.csproj", "run", "--no-launch-profile"]

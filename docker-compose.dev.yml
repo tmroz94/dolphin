@@ -1,0 +1,241 @@
+services:
+  dolphin-dev-keycloak-db:
+    image: postgres:17.4-alpine3.21
+    platform: linux/arm64
+    container_name: dolphin-dev-keycloak-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DB}
+      POSTGRES_USER: ${KEYCLOAK_DB_USER}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - dolphin-dev-keycloak-db-data:/var/lib/postgresql/data
+    ports:
+      - '5300:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${KEYCLOAK_DB_USER} -d ${KEYCLOAK_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - dolphin-dev-keycloak-network
+
+  dolphin-dev-keycloak:
+    image: quay.io/keycloak/keycloak:26.1.4
+    platform: linux/arm64
+    container_name: dolphin-dev-keycloak
+    restart: unless-stopped
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://dolphin-dev-keycloak-db:5432/${KEYCLOAK_DB}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: false
+      KC_HOSTNAME_STRICT_HTTPS: false
+      KC_PROXY: edge
+      KC_HOSTNAME_ADMIN: localhost
+      KC_HOSTNAME_ADMIN_STRICT: false
+      KC_HOSTNAME_ADMIN_STRICT_HTTPS: false
+      KC_HTTP_ENABLED: true
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME_URL: https://localhost
+      KC_HOSTNAME_ADMIN_URL: https://localhost
+      KC_HOSTNAME_ADMIN_STRICT_BACKCHANNEL: false
+      KC_HOSTNAME_STRICT_BACKCHANNEL: false
+      KC_FEATURES: preview,admin-fine-grained-authz,admin-api,admin-console,client-policies,client-secret-rotation,impersonation,openid-connect,recovery-codes,scripts,step-up-authentication,user-profile,web-authn
+      KC_METRICS_ENABLED: true
+      KC_DEBUG: true
+      KC_LOG_LEVEL: DEBUG
+    depends_on:
+      dolphin-dev-keycloak-db:
+        condition: service_healthy
+    ports:
+      - '5400:8080'
+    entrypoint:
+      - /opt/keycloak/bin/kc.sh
+      - start-dev
+      - --health-enabled=true
+      - --features=preview,admin-fine-grained-authz,admin-api,admin-console,client-policies,client-secret-rotation,impersonation,openid-connect,recovery-codes,scripts,step-up-authentication,user-profile,web-authn
+    networks:
+      - dolphin-dev-keycloak-network
+      - dolphin-dev-network
+
+  dolphin-dev-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: dolphin-dev-db
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: Y
+      MSSQL_SA_PASSWORD: ${DOLPHIN_DB_ADMIN_PASSWORD}
+      MSSQL_AGENT_ENABLED: true
+      MSSQL_TELEMETRY_ENABLED: false
+    volumes:
+      - dolphin-dev-db-data:/var/opt/mssql
+    ports:
+      - '5500:1433'
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P ${DOLPHIN_DB_ADMIN_PASSWORD} -C -Q "SELECT @@VERSION" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - dolphin-dev-network
+
+  dolphin-dev-db-initialization:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: dolphin-dev-db-initialization
+    depends_on:
+      dolphin-dev-db:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${DOLPHIN_DB_ADMIN_PASSWORD}
+      SERVER_NAME: dolphin-dev-db
+      DATABASE_NAME: ${DOLPHIN_DB}
+      DATABASE_USERNAME: ${DOLPHIN_DB_USER}
+      DATABASE_PASSWORD: ${DOLPHIN_DB_PASSWORD}
+      INIT_SQL_PATH: /usr/src/app/init.sql
+    volumes:
+      - ./scripts/init.sh:/usr/src/app/init.sh:ro
+      - ./scripts/mssql.sql:/usr/src/app/init.sql:ro
+    entrypoint: ['/bin/sh', '/usr/src/app/init.sh']
+    networks:
+      - dolphin-dev-network
+
+  dolphin-dev-db-migrations:
+    container_name: dolphin-dev-db-migrations
+    platform: linux/arm64
+    profiles:
+      - migrations
+    build:
+      context: .
+      dockerfile: Dolphin.Migrations/Dockerfile
+    depends_on:
+      dolphin-dev-db-initialization:
+        condition: service_completed_successfully
+    environment:
+      - server=dolphin-dev-db
+      - database=${DOLPHIN_DB}
+      - username=${DOLPHIN_DB_USER}
+      - password=${DOLPHIN_DB_PASSWORD}
+      - migration-name=${MIGRATION_NAME:-}
+      - revert=${MIGRATION_REVERT:-false}
+    networks:
+      - dolphin-dev-network
+
+  dolphin-dev-queries:
+    container_name: dolphin-dev-queries
+    platform: linux/arm64
+    restart: unless-stopped
+    profiles:
+      - queries-api
+    build:
+      context: .
+      dockerfile: Dolphin.Queries.API/Dockerfile-Dev
+    depends_on:
+      dolphin-dev-db:
+        condition: service_healthy
+      dolphin-dev-db-migrations:
+        condition: service_completed_successfully
+        required: false
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DolphinDb=Server=dolphin-dev-db;Database=${DOLPHIN_DB};User Id=${DOLPHIN_DB_USER};Password=${DOLPHIN_DB_PASSWORD};TrustServerCertificate=True
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+      - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ./Dolphin.Queries.API:/app/Dolphin.Queries.API
+      - ./Dolphin.Queries.Application:/app/Dolphin.Queries.Application
+      - ./Dolphin.Queries.Infrastructure:/app/Dolphin.Queries.Infrastructure
+      - ./Dolphin.Shared:/app/Dolphin.Shared
+      - ./Dolphin.Protos:/app/Dolphin.Protos
+    ports:
+      - '5180:80'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:80/health', '||', 'exit', '1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - dolphin-dev-network
+
+  dolphin-dev-commands:
+    container_name: dolphin-dev-commands
+    platform: linux/arm64
+    restart: unless-stopped
+    profiles:
+      - commands-api
+    build:
+      context: .
+      dockerfile: Dolphin.Commands.API/Dockerfile-Dev
+    depends_on:
+      dolphin-dev-db:
+        condition: service_healthy
+      dolphin-dev-db-migrations:
+        condition: service_completed_successfully
+        required: false
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DolphinDb=Server=dolphin-dev-db;Database=${DOLPHIN_DB};User Id=${DOLPHIN_DB_USER};Password=${DOLPHIN_DB_PASSWORD};TrustServerCertificate=True
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+      - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ./Dolphin.Commands.API:/app/Dolphin.Commands.API
+      - ./Dolphin.Commands.Application:/app/Dolphin.Commands.Application
+      - ./Dolphin.Commands.Infrastructure:/app/Dolphin.Commands.Infrastructure
+      - ./Dolphin.Domain:/app/Dolphin.Domain
+      - ./Dolphin.Shared:/app/Dolphin.Shared
+      - ./Dolphin.Protos:/app/Dolphin.Protos
+    ports:
+      - '5280:80'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:80/health', '||', 'exit', '1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - dolphin-dev-network
+
+  dolphin-dev-client:
+    container_name: dolphin-dev-client
+    platform: linux/arm64
+    restart: unless-stopped
+    profiles:
+      - client
+    build:
+      context: .
+      dockerfile: Dolphin.Client/Dockerfile-Dev
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+      - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ./Dolphin.Client:/app/Dolphin.Client
+      - ./Dolphin.Shared:/app/Dolphin.Shared
+      - ./Dolphin.Protos:/app/Dolphin.Protos
+    ports:
+      - '5080:80'
+    networks:
+      - dolphin-dev-network
+
+volumes:
+  dolphin-dev-keycloak-db-data:
+    name: dolphin-dev-keycloak-db-data
+  dolphin-dev-db-data:
+    name: dolphin-dev-db-data
+
+networks:
+  dolphin-dev-keycloak-network:
+    name: dolphin-dev-keycloak-network
+    driver: bridge
+  dolphin-dev-network:
+    name: dolphin-dev-network
+    driver: bridge

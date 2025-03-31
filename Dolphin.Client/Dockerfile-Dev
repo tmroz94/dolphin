@@ -1,0 +1,11 @@
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+
+# Step 1: Set up dotnet watch (no publish here, dev container only)
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+
+WORKDIR /app/Dolphin.Client
+
+# Step 2: Default command runs dotnet watch from correct path
+CMD ["dotnet", "watch", "--project", "Dolphin.Client.csproj", "run", "--no-launch-profile"]

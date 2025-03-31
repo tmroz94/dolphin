@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.UI" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dolphin.Queries.Application\Dolphin.Queries.Application.csproj" />
+    <ProjectReference
+      Include="..\Dolphin.Queries.Infrastructure\Dolphin.Queries.Infrastructure.csproj" />
+    <ProjectReference Include="..\Dolphin.Shared\Dolphin.Shared.csproj" />
+    <ProjectReference Include="..\Dolphin.Protos\Dolphin.Protos.csproj" />
+  </ItemGroup>
+
+</Project>
